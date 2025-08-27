@@ -78,11 +78,11 @@ select
 
 	case_ID,
 	NAME_OF_CASE_MANAGER,
-	case when NAME_OF_CASE_MANAGER like '%Damion%' then 'Damion Brown'
-		 when NAME_OF_CASE_MANAGER like '%Kendalyn Stephens%' then 'Kendalyn Stephens'
-		 when NAME_OF_CASE_MANAGER like '%Lauren Pasutti%' then 'Lauren Pasutti'
-		 when NAME_OF_CASE_MANAGER like '%Catie Bryan%' then 'Catie Bryan'
-		 when NAME_OF_CASE_MANAGER like '%Emily Berns%' then 'Emily Berns'
+	case when NAME_OF_CASE_MANAGER like '%----%' then '------'
+		 when NAME_OF_CASE_MANAGER like '%-----%' then '--------'
+		 when NAME_OF_CASE_MANAGER like '%-------%' then '------'
+		 when NAME_OF_CASE_MANAGER like '%--------%' then '--------'
+		 when NAME_OF_CASE_MANAGER like '%--------%' then '--------'
 	else 'Non-DPH' end as assignment "Assigned to:",
 
 	CODE
@@ -126,5 +126,6 @@ ods excel options (sheet_interval = "now" sheet_name = "CPO: &start_dte" embedde
 	proc print data=CPO_RedCap_raw noobs label;run;
 
 ods excel close;
+
 
 
