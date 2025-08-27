@@ -27,7 +27,6 @@ libname denorm 'Z:\20250801'; /*Select the file name you want from the Z drive. 
 
 dm 'odsresults; clear';
 
-
 /*Extract CPO mechanisms, we only want non-KPC so we'll drop KPC*/
 proc sql;
 create table CPO_mechext as
@@ -44,9 +43,8 @@ select
 		   else '' end as CPO_CARB_MECHANISM "CPO mechanism",
 
 	CRE_CARB_ORGANISM as organism "Organism identified",
-	SPECIMEN_DT as spec_date "Specimen date" format date9.,
+	max(SPECIMEN_DT) as spec_date "Specimen date" format date9.,
 	HCE "Healthcare experience, setting type",
-
 
 /*Ok for zip code, it gets hairy: first lets combine all of our addresses into one*/
 	case when ORDER_FACILITY not in ('Other Hospital/Health Facility||' , '') then ORDER_FACILITY else '' end as order_facility_1, /*This takes facility names where we have them and drops other text to missing*/
@@ -58,23 +56,63 @@ select
 	end as zip_code "Ordering facility zip", /*and we leave it blank if the pattern is unmatched, and name it zip code*/
 
 /*For ease of reading, we'll pull in the facility name for the missing values so we can manually find them on the front end*/
-	case when calculated zip_code in ('') then calculated fac_final else '' end as facility "No zip; facility name" 
+	case when calculated zip_code in ('') then calculated fac_final else '' end as facility "No zip; facility name"
 
 
 from denorm.laboratory_dd_table_cre
 /*Confine to CPO, since our start date, and not missing or KPC*/
 	where product in ('CPO') and SPECIMEN_DT GE ("&start_dte"d)
-	having CPO_CARB_MECHANISM not in ('KPC' , '')
+	group by Event_ID
+	having CPO_CARB_MECHANISM not in ('KPC' , '') /*Add or remove mechanisms here to refine*/
 	order by case_ID	
 ;
 /*Drop the columns we created that we don't actually care about (new facility name and facility final*/
 alter table CPO_mechext drop order_facility_1 , fac_final
 ;
+quit;
+
+/*Now we need to find who each case is assigned to at the state*/
+proc sql;
+create table case_manager_CPO as
+select 
+
+	case_ID,
+	NAME_OF_CASE_MANAGER,
+	case when NAME_OF_CASE_MANAGER like '%Damion%' then 'Damion Brown'
+		 when NAME_OF_CASE_MANAGER like '%Kendalyn Stephens%' then 'Kendalyn Stephens'
+		 when NAME_OF_CASE_MANAGER like '%Lauren Pasutti%' then 'Lauren Pasutti'
+		 when NAME_OF_CASE_MANAGER like '%Catie Bryan%' then 'Catie Bryan'
+		 when NAME_OF_CASE_MANAGER like '%Emily Berns%' then 'Emily Berns'
+	else 'Non-DPH' end as assignment "Assigned to:",
+
+	CODE
+
+from denorm.admin_trail
+	
+	where ASSIGNED_TO_DT GE ("01jan2025"d) 
+		and CODE in ("CPO" , "CRE") /*Keep only CPO/CRE (should only be CPO but just in case)*/
+	having assignment not in ('Non-DPH')/*drop if not NC DPH employee*/ 
+	order by case_ID desc 
+		;
+quit;
+
+proc sql;
+create table case_manager_merge as
+select 
+
+	a.*,
+	b.assignment
+
+
+from CPO_mechext a left join case_manager_CPO b 
+	on a.Event_ID = b.CASE_ID
+	order by spec_date , Event_ID;
+
 
 quit;
 
 /*Last thing, dedupe on event ID, mechanism, and organism. If all three line up then no need to have multiple rows*/
-proc sort data=CPO_mechext out=CPO_RedCap_raw nodupkey;
+proc sort data=case_manager_merge out=CPO_RedCap_raw nodupkey;
 	by Event_ID CPO_CARB_MECHANISM organism;
 run;
 
@@ -83,8 +121,10 @@ run;
 title; footnote;
 /*Set your output pathway here*/
 ods excel file="T:\HAI\Code library\Epi curve example\analysis\CPO_CDCRedCap Upload_&sysdate..xlsx";
-
 ods excel options (sheet_interval = "now" sheet_name = "CPO: &start_dte" embedded_titles='Yes');
-proc print data=CPO_RedCap_raw noobs label;run;
+
+	proc print data=CPO_RedCap_raw noobs label;run;
 
 ods excel close;
+
+
