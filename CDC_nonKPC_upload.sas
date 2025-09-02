@@ -33,17 +33,20 @@ create table CPO_mechext as
 select
 
 	case_ID as Event_ID "NCEDSS Event ID",
+	product,
 /*Take all CPOs and search for MECHANISMS in the lab results where the result is confirmed*/
-	case  when product in ("CPO") and TEST like '%KPC%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown') then 'KPC'
-		  when product in ("CPO") and  TEST like '%NDM%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'NDM'
-		  when product in ("CPO") and  TEST like '%OXA-48%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'OXA-48' 
-		  when product in ("CPO") and  TEST like '%OXA-23%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'OXA-23' 
-		  when product in ("CPO") and  TEST like '%OTHER%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'Other' 
-		  when product in ("CPO") and  TEST like '%VIM%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'VIM' 
+	case  when product in ("CPO", "CRE") and TEST like '%KPC%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown') then 'KPC'
+		  when product in ("CPO", "CRE") and  TEST like '%NDM%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'NDM'
+		  when product in ("CPO", "CRE") and  TEST like '%OXA-48%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'OXA-48' 
+		  when product in ("CPO", "CRE") and  TEST like '%OXA-23%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'OXA-23'
+		  when product in ("CPO", "CRE") and  TEST like '%OXA-24%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'OXA-24'  
+		  when product in ("CPO", "CRE") and  TEST like '%OTHER%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'Other' 
+		  when product in ("CPO", "CRE") and  TEST like '%VIM%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'VIM' 
+		  when product in ("CPO", "CRE") and  TEST like '%IMP%' and result not in ('Not Detected' , 'Not detected', 'Negative' , 'Unknown')  then 'IMP' 
 		   else '' end as CPO_CARB_MECHANISM "CPO mechanism",
 
 	CRE_CARB_ORGANISM as organism "Organism identified",
-	max(SPECIMEN_DT) as spec_date "Specimen date" format date9.,
+	max(SPECIMEN_DT) as spec_date "Most Recent Specimen date" format date9.,
 	HCE "Healthcare experience, setting type",
 
 /*Ok for zip code, it gets hairy: first lets combine all of our addresses into one*/
@@ -61,15 +64,19 @@ select
 
 from denorm.laboratory_dd_table_cre
 /*Confine to CPO, since our start date, and not missing or KPC*/
-	where product in ('CPO') and SPECIMEN_DT GE ("&start_dte"d)
+	where product in ('CPO', 'CRE') and SPECIMEN_DT GE ("&start_dte"d)
 	group by Event_ID
-	having CPO_CARB_MECHANISM not in ('KPC' , '') /*Add or remove mechanisms here to refine*/
+	having CPO_CARB_MECHANISM not in ('') /*Add or remove mechanisms here to refine*/
 	order by case_ID	
 ;
 /*Drop the columns we created that we don't actually care about (new facility name and facility final*/
 alter table CPO_mechext drop order_facility_1 , fac_final
 ;
 quit;
+
+
+
+proc print data=CPO_mechext; where Event_ID in ('104097294'); run;
 
 /*Now we need to find who each case is assigned to at the state*/
 proc sql;
@@ -78,11 +85,11 @@ select
 
 	case_ID,
 	NAME_OF_CASE_MANAGER,
-	case when NAME_OF_CASE_MANAGER like '%----%' then '------'
-		 when NAME_OF_CASE_MANAGER like '%-----%' then '--------'
-		 when NAME_OF_CASE_MANAGER like '%-------%' then '------'
-		 when NAME_OF_CASE_MANAGER like '%--------%' then '--------'
-		 when NAME_OF_CASE_MANAGER like '%--------%' then '--------'
+	case when NAME_OF_CASE_MANAGER like '%Damion%' then 'Damion Brown'
+		 when NAME_OF_CASE_MANAGER like '%Kendalyn Stephens%' then 'Kendalyn Stephens'
+		 when NAME_OF_CASE_MANAGER like '%Lauren Pasutti%' then 'Lauren Pasutti'
+		 when NAME_OF_CASE_MANAGER like '%Catie Bryan%' then 'Catie Bryan'
+		 when NAME_OF_CASE_MANAGER like '%Emily Berns%' then 'Emily Berns'
 	else 'Non-DPH' end as assignment "Assigned to:",
 
 	CODE
@@ -106,26 +113,37 @@ select
 
 from CPO_mechext a left join case_manager_CPO b 
 	on a.Event_ID = b.CASE_ID
-	order by spec_date , Event_ID;
+	order by spec_date asc;
 
 
 quit;
-
 /*Last thing, dedupe on event ID, mechanism, and organism. If all three line up then no need to have multiple rows*/
 proc sort data=case_manager_merge out=CPO_RedCap_raw nodupkey;
 	by Event_ID CPO_CARB_MECHANISM organism;
+	
 run;
+/*Proc sort messes up the ordering idk why. Also confine to non-KPC here if necessary*/
+proc sql;
+create table final_CRE_upload as
+select * from CPO_RedCap_raw
+	having CPO_CARB_MECHANISM not in ('KPC') /**/
+	order by spec_date asc;
+quit;
+
+
+proc print data=final_CRE_upload;run;
+
 
 
 /*Output so team can review in a nice clean excel sheet*/
 title; footnote;
 /*Set your output pathway here*/
+*ods excel file="T:\HAI\Code library\Epi curve example\analysis\CPO_ALL_&sysdate..xlsx";
 ods excel file="T:\HAI\Code library\Epi curve example\analysis\CPO_CDCRedCap Upload_&sysdate..xlsx";
 ods excel options (sheet_interval = "now" sheet_name = "CPO: &start_dte" embedded_titles='Yes');
 
-	proc print data=CPO_RedCap_raw noobs label;run;
+	proc print data=final_CRE_upload noobs label;run;
 
 ods excel close;
-
 
 
