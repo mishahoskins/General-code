@@ -1,7 +1,7 @@
 
 /*
  *------------------------------------------------------------------------------
- * Program Name:  CDC_nonKPC_RedCap_20250825 
+ * Program Name:  CDC_nonKPC_upload 
  * Author:        Mikhail Hoskins
  * Date Created:  08/25/2025
  * Date Modified: .
@@ -9,25 +9,26 @@
 				  on VPN. 
  *
  * Inputs:       laboratory_dd_table_cre : Z:\YYYYMMDD
- * Output:       CDC_nonKPC_RedCap_20250825.xlsx
+ * Output:       CDC_nonKPC_RedCap_DATE.xlsx <-- a line list of all CPO within specified date range to review and submit to CDC. 
  * Notes:        Program pulls CPO HAIs. ***CPOs will be updated in the denormalized tables to 
  *				 reflect CPO rule change . 
- *				 Annotations are between /* to help guide. This is one clean ahh code fr.  
+ *				 Annotations are between /* to help guide.   
  *				 
  *
  *------------------------------------------------------------------------------
  */
 
 
-/*Step 1: set your pathway. Must have Z drive (or however you are mapped to denormalized tables) access.*/
+/*Set your pathway. Must have Z drive (or however you are mapped to denormalized tables) access.*/
 libname denorm 'Z:\20250801'; /*Select the file name you want from the Z drive. Format is YYYYMMDD. Tables are created monthly*/
-/*Step 1a: set your date range in the format specified.*/
-%let start_dte = 01Apr25; /*Set your start date for range of values DDMMYY*/
-%let end_dte = 25Aug25; /*Set your end date for range of values DDMMMYY*/
+/*Set your date range in the format specified.*/
+%let start_dte = 01APR25; /*Set your start date for range of values DDMMYY*/
+%let end_dte = 03SEP25; /*Set your end date for range of values DDMMMYY*/
 
+/*clear all your other terrible results*/
 dm 'odsresults; clear';
 
-/*Extract CPO mechanisms, we only want non-KPC so we'll drop KPC*/
+/*Extract CPO mechanisms, we only want non-KPC so we'll drop KPC later*/
 proc sql;
 create table CPO_mechext as
 select
@@ -53,7 +54,7 @@ select
 	case when ORDER_FACILITY not in ('Other Hospital/Health Facility||' , '') then ORDER_FACILITY else '' end as order_facility_1, /*This takes facility names where we have them and drops other text to missing*/
 	coalesce(calculated order_facility_1 , ORDER_FAC_OTHER) as fac_final, /*Combine to a single facility column*/
 
-/*Now we're going to use a prx match to find anything that follows two capital letters and a comma, for example: NC, (this is almost always a zip in an address)*/
+/*Now we're going to use a regular expression-prx match to find anything that follows two capital letters and a comma, for example: NC, (this is almost always a zip in an address)*/
 	case when prxmatch('/, [A-Z]{2}, *\d{5}/', calculated fac_final) > 0 then prxchange('s/.*?, [A-Z]{2}, *(\d{5}).*/\1/', 1, calculated fac_final) /*At the end here we prx change it to pull out just the 5 number zip*/
 		else ''
 	end as zip_code "Ordering facility zip", /*and we leave it blank if the pattern is unmatched, and name it zip code*/
@@ -64,7 +65,7 @@ select
 
 from denorm.laboratory_dd_table_cre
 /*Confine to CPO, since our start date, and not missing or KPC*/
-	where product in ('CPO', 'CRE') and SPECIMEN_DT GE ("&start_dte"d)
+	where product in ('CPO','CRE') and SPECIMEN_DT GE ("&start_dte"d)
 	group by Event_ID
 	having CPO_CARB_MECHANISM not in ('') /*Add or remove mechanisms here to refine*/
 	order by case_ID	
@@ -75,9 +76,6 @@ alter table CPO_mechext drop order_facility_1 , fac_final
 quit;
 
 
-
-proc print data=CPO_mechext; where Event_ID in ('104097294'); run;
-
 /*Now we need to find who each case is assigned to at the state*/
 proc sql;
 create table case_manager_CPO as
@@ -85,7 +83,7 @@ select
 
 	case_ID,
 	NAME_OF_CASE_MANAGER,
-	case when NAME_OF_CASE_MANAGER like '%Damion%' then 'Damion Brown'
+	case when NAME_OF_CASE_MANAGER like '%Damion Brown%' then 'Damion Brown'
 		 when NAME_OF_CASE_MANAGER like '%Kendalyn Stephens%' then 'Kendalyn Stephens'
 		 when NAME_OF_CASE_MANAGER like '%Lauren Pasutti%' then 'Lauren Pasutti'
 		 when NAME_OF_CASE_MANAGER like '%Catie Bryan%' then 'Catie Bryan'
@@ -96,7 +94,7 @@ select
 
 from denorm.admin_trail
 	
-	where ASSIGNED_TO_DT GE ("01jan2025"d) 
+	where ASSIGNED_TO_DT GE ("01jan2025"d) /*Pulling a smaller subset from denorm tables for time*/
 		and CODE in ("CPO" , "CRE") /*Keep only CPO/CRE (should only be CPO but just in case)*/
 	having assignment not in ('Non-DPH')/*drop if not NC DPH employee*/ 
 	order by case_ID desc 
@@ -113,7 +111,7 @@ select
 
 from CPO_mechext a left join case_manager_CPO b 
 	on a.Event_ID = b.CASE_ID
-	order by spec_date asc;
+	;
 
 
 quit;
@@ -122,7 +120,7 @@ proc sort data=case_manager_merge out=CPO_RedCap_raw nodupkey;
 	by Event_ID CPO_CARB_MECHANISM organism;
 	
 run;
-/*Proc sort messes up the ordering idk why. Also confine to non-KPC here if necessary*/
+/*Proc sort messes up the ordering because we're not sorting/deduplicating by date anywhere. Also confine to non-KPC here if necessary*/
 proc sql;
 create table final_CRE_upload as
 select * from CPO_RedCap_raw
@@ -138,7 +136,7 @@ proc print data=final_CRE_upload;run;
 /*Output so team can review in a nice clean excel sheet*/
 title; footnote;
 /*Set your output pathway here*/
-*ods excel file="T:\HAI\Code library\Epi curve example\analysis\CPO_ALL_&sysdate..xlsx";
+*ods excel file="T:\HAI\Code library\Epi curve example\analysis\CPO_ALL_&sysdate..xlsx"; /*<-- use this name if you include KPC*/
 ods excel file="T:\HAI\Code library\Epi curve example\analysis\CPO_CDCRedCap Upload_&sysdate..xlsx";
 ods excel options (sheet_interval = "now" sheet_name = "CPO: &start_dte" embedded_titles='Yes');
 

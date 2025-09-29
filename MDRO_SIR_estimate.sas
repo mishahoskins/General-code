@@ -296,6 +296,9 @@ from population_score
 ;
 quit;
 
+proc print data=population_score (obs = 100);  run;
+
+
 /*Now sum all of our probabilities to create an 'expected' value and sum all the case_flags to create our 'actual' value. Then we can take the standard error to create our confidence intervals and display a nice "SIR" estimate table*/
 proc sql;
 create table test_sir_mdro_CI as
@@ -323,3 +326,32 @@ quit;
 
 
 proc print data=test_sir_mdro_CI noobs label;run;
+
+
+
+
+
+
+
+
+
+
+/*Negative binomial reg*/
+
+proc sort data=population_file;
+	by HCE_yn;
+run;
+proc means mean var n data=population_file;
+by HCE_yn;
+
+	var case_flag;
+run;
+
+
+proc genmod data=population_file ;
+
+	class HCE_yn (param = ref ref='0');
+	model case_flag = HCE_yn age_group/ type3 dist=negbin;
+
+run;
+
