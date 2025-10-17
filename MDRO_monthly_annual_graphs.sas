@@ -21,6 +21,8 @@
 %let disease3 = GAS; 
 %let disease4 = CAURIS;
 
+/*State pop.(update annually)*/
+%let state_pop = 10835491;
 
 	/*update these*/
 %let mindate = 01Jan2025; /*Minimum date you want to view (usually start of the year for monthly graphs). We also use this for the year max to make sure we're displaying non-complete data for the most recent year*/
@@ -33,13 +35,16 @@ create table min_max as
 select
 
 	max(event_date) as max_date format date9.,
-	min(event_date) as min_date format date9.
+	case when type in ('CAURIS') then min(event_date) else . end as min_date_cauris format date9.,
+	
+	case when type in ('CRE') then min(event_date) else . end as min_date_cre format date9.
 
-from analysis.analysis
+
+from analysis.analysis_forgraphs
+	having event_date GE ('01JAN2025'd)
+	order min_date_cauris
 ;
 quit;
-
-proc print data=min_max noobs;run;
 
 
 /*Ok, main step here: group CRE +CPO and rename STRA to GAS. Then we are assigning the most recent month/year a "tag" so we display those as a separate graph. The most recent month/year data will display in a slightly
@@ -57,7 +62,7 @@ select *,
 
 	else type end as type_new 
 
-from analysis
+from analysis.analysis_forgraphs
 	where type in ('STRA', 'CPO', 'CRE', 'CAURIS') 
 		/*having monthtag GE ('01jan25'd)*/
 ;
@@ -84,6 +89,7 @@ from rename
 
 ;
 quit;
+
 
 /*Macros because lazy*/
 
@@ -115,12 +121,13 @@ where EVENT_DATE ge ('01jan25'd)
 ;
 
 quit;
+ods proclabel="&disease Table";
+proc print data=quick_metrics noobs label contents= "Month, Total, IR by &disease";run;
 
-proc print data=quick_metrics noobs label;run;
 
-
-proc sgplot data=quick_metrics noborder noautolegend;
-
+ods proclabel="&disease Graph";
+proc sgplot data=quick_metrics noborder noautolegend
+description = "&disease case count by month";
 	/*series X=testreportqtr Y=nonrural_ir_&disease / datalabel lineattrs=(thickness=3)  datalabelattrs=(family="Arial" size=10);/* Plot for non-rural*/
 	/*series X=testreportqtr Y=rural_ir_&disease / datalabel lineattrs=(thickness=3)  datalabelattrs=(family="Arial" size=10);/* Plot for non-rural*/
 
@@ -144,19 +151,24 @@ proc sgplot data=quick_metrics noborder noautolegend;
                 across=1 noborder;
 
 run;
-
 %mend;
 
 /*Macro for stacked bar graphs. Diabolical, lightly shaded last bar for most recent data to show incompleteness*/
-%macro stack_graphs (timevar=, response_1=, response_2=, timeframe=, title= , color_schm=, disease=, startdate=);  
-proc sgplot data = cases_count  noborder noautolegend noborder noautolegend;
+%macro stack_graphs (contentslabel=, timevar=, response_1=, timevar2=, response_2=, timeframe=, title= , color_schm=, disease=, startdate=);  
+ods proclabel="Bar Graphs, &timevar2: &contentslabel";
+proc sgplot data = cases_count pad=(top=10) noborder 
+	description= "&contentslabel by &timevar2";
 /*year by cases up to current year (but not including current month), group by disease type, stack*/
-vbar &timevar / response= &response_1 group =  type_new groupdisplay=stack fillattrs=(transparency=0.2)  outlineattrs=(color= '' thickness=0)
+vbar &timevar / response= &response_1 group =  type_new groupdisplay=stack fillattrs=(transparency=0.2) outlineattrs=(color= "0000")
 
 		datalabel
 		datalabelattrs=(color=black size=10 family="Arial");
 
+		*inset "(*ESC*){sup '*'} current &timevar2 data" "may be incomplete" / position=bottomright backcolor= "white" valuealign=right;
+
+		
 xaxis label = "&timeframe"
+
 		valueattrs= (family="Arial" size=10)
 		labelattrs= (family="Arial" weight= bold size=10)
 		;
@@ -166,14 +178,18 @@ xaxis label = "&timeframe"
 		labelattrs= (family="Arial" weight=bold size=10)
 		;
 
-	styleattrs datacolors= &color_schm;
+	styleattrs datacolors= (&color_schm);
 
 			    keylegend / title="MDRO:" titleattrs= (size=10 family="Arial" weight=bold) valueattrs= (size=10 family="Arial") location=outside position=topleft 
                 across=3 noborder;
 
+				keylegend / title="*Data in current &timevar2 may not be complete" titleattrs= (size=8 family="Arial" ) 
+				exclude= ("GAS" "CPO" "CAURIS") location=outside position=topright
+                noborder;
+
 /*month by cases IN current month, group by disease type, stack*/
 				/*Tricky SAS thing here: this needs to go after the keylegend so it doesn't display a separate legend for the lightly shaded "inocomplete" data.*/
-vbar &timevar / response= &response_2 group = type_new groupdisplay=stack fillattrs=(transparency=0.8) outlineattrs=(color= VIYG thickness=0)
+vbar &timevar / response= &response_2 group = type_new groupdisplay=stack fillattrs=(transparency=0.8) outlineattrs=(color= "0000")
 
 		datalabel
 		datalabelattrs=(color=black size=10 family="Arial");
@@ -182,7 +198,9 @@ vbar &timevar / response= &response_2 group = type_new groupdisplay=stack fillat
 
 
 run;
+
 %mend;
+
 
 dm 'odsresults; clear';
 
@@ -207,13 +225,63 @@ ods excel options (sheet_interval = "now" sheet_name = "&disease4" embedded_titl
 /*Monthly plots*/
 ods excel options (sheet_interval = "now" sheet_name = "bar monthly" embedded_titles='Yes');
 /*Monthly graphs*/
-%stack_graphs(timevar= monthtag, response_1= cases_tag, response_2= recent_month_tag, timeframe= Month, title= (CPO + C.auris), color_schm= (DEYPK STB), disease= ("CPO" "CAURIS"), startdate="&mindate"d);
-%stack_graphs(timevar= monthtag, response_1= cases_tag, response_2= recent_month_tag, timeframe = Month, title = (GAS), color_schm = (DEYG), disease = ("GAS"), startdate="&mindate"d);
+%stack_graphs(timevar= monthtag, response_1= cases_tag, timevar2= month, response_2= recent_month_tag, timeframe= Month, title= (CPO + C.auris), color_schm= DEYPK STB, disease= ("CAURIS" "CPO" ), startdate="&mindate"d);
+%stack_graphs(timevar= monthtag, response_1= cases_tag, timevar2= month, response_2= recent_month_tag, timeframe = Month, title = (GAS), color_schm = DEYG, disease = ("GAS"), startdate="&mindate"d);
 
 /*Annual plots*/
 ods excel options (sheet_interval = "now" sheet_name = "bar annual" embedded_titles='Yes');
 /*Annual graphs*/
-%stack_graphs(timevar= yeartag, response_1= cases_tag_yr, response_2= recent_yr_tag, timeframe= Year, title= (CPO + C.auris), color_schm= (STB DEYPK), disease= ("CPO" "CAURIS"), startdate="01jan2015"d);
-%stack_graphs(timevar= yeartag, response_1= cases_tag_yr, response_2= recent_yr_tag, timeframe = Year, title = GAS, color_schm = (DEYG), disease = ("GAS"), startdate="01jan2015"d);
+%stack_graphs(contentslabel= &disease1 &disease3, timevar= yeartag, response_1= cases_tag_yr, timevar2= year, response_2= recent_yr_tag, timeframe= Year, title= (CPO + C.auris), color_schm= STB DEYPK, disease= ("CPO" "CAURIS"), startdate="01jan2015"d);
+%stack_graphs(contentslabel= &disease1 &disease3,timevar= yeartag, response_1= cases_tag_yr, timevar2= year, response_2= recent_yr_tag, timeframe = Year, title = GAS, color_schm = DEYG, disease = ("GAS"), startdate="01jan2015"d);
 
 ods excel close;
+
+
+/*ODS PDF output*/
+
+
+ods graphics /noborder;
+title; footnote;
+
+/*Set your output pathway here*/ 
+
+ods pdf file="T:\HAI\Code library\Epi curve example\analysis\MDRO_trends 2025_&sysdate..pdf" 
+/*Named a generic overwriteable name so we can continue to reproduce and autopopulate a template;*/
+style=journal startpage=no contents=yes;
+
+options number nodate;
+
+title font="Arial" height=12pt "&disease1";
+%metrics(disease=&disease1, color_schm= STB);
+
+ods pdf startpage=now;
+title font="Arial" height=12pt "&disease3";
+%metrics(disease=&disease3, color_schm= DEYG);
+
+ods pdf startpage=now;
+title "&disease4";
+%metrics(disease=&disease4, color_schm = DEYPK);
+
+/*Monthly plots*/
+ods pdf startpage=now;
+title font="Arial" height=12pt "Monthly Bar Graphs";
+/*Monthly graphs*/
+%stack_graphs(contentslabel= &disease1 &disease4, timevar= monthtag, response_1= cases_tag, timevar2= month, response_2= recent_month_tag, timeframe= Month, title= (CPO + C.auris), color_schm= DEYPK STB, disease= ("CAURIS" "CPO" ), startdate="&mindate"d);
+title;
+%stack_graphs(contentslabel= &disease3, timevar= monthtag, response_1= cases_tag, timevar2= month, response_2= recent_month_tag, timeframe = Month, title = (GAS), color_schm = DEYG, disease = ("GAS"), startdate="&mindate"d);
+
+/*Annual plots*/
+ods pdf startpage=now;
+title font="Arial" height=12pt "Annual Bar Graphs";
+/*Annual graphs*/
+%stack_graphs(contentslabel= &disease1 &disease4, timevar= yeartag, response_1= cases_tag_yr, timevar2= year, response_2= recent_yr_tag, timeframe= Year, title= (CPO + C.auris), color_schm= STB DEYPK, disease= ("CPO" "CAURIS"), startdate="01jan2015"d);
+title;
+%stack_graphs(contentslabel= &disease3, timevar= yeartag, response_1= cases_tag_yr, timevar2= year, response_2= recent_yr_tag, timeframe = Year, title = GAS, color_schm = DEYG, disease = ("GAS"), startdate="01jan2015"d);
+
+ods pdf close;
+
+
+
+proc template;
+list styles;
+run;
