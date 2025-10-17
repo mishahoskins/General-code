@@ -20,10 +20,25 @@
 
 
 /*Set your pathway. Must have Z drive (or however you are mapped to denormalized tables) access.*/
-libname denorm 'Z:\20250801'; /*Select the file name you want from the Z drive. Format is YYYYMMDD. Tables are created monthly*/
+libname denorm 'Z:\20251001'; /*Select the file name you want from the Z drive. Format is YYYYMMDD. Tables are created monthly*/
 /*Set your date range in the format specified.*/
 %let start_dte = 01APR25; /*Set your start date for range of values DDMMYY*/
-%let end_dte = 03SEP25; /*Set your end date for range of values DDMMMYY*/
+%let end_dte = 30SEP25; /*Set your end date for range of values DDMMMYY*/
+
+/*Now we'll set our case manager names: update as needed to the number/names of those responding to NCEDSS entries AS THEIR NAMES APPEAR IN NCEDSS.*/
+/*Misspelled names or different capitalizations my throw off numbers by 1 or 2. Make sure names are correct in NCEDSS*/
+%let name1 = Damion Brown;
+%let name2 = Kendalyn Stephens;	
+%let name3 = Lauren Pasutti;
+%let name4 = Catie Bryan;
+%let name5 = Emily Berns;
+
+/*Worth checking the log to make sure they're displaying properly*/
+	%put &name1;
+	%put &name2;
+	%put &name3;
+	%put &name4;
+	%put &name5;
 
 /*clear all your other terrible results*/
 dm 'odsresults; clear';
@@ -83,20 +98,17 @@ select
 
 	case_ID,
 	NAME_OF_CASE_MANAGER,
-	case when NAME_OF_CASE_MANAGER like '%Damion Brown%' then 'Damion Brown'
-		 when NAME_OF_CASE_MANAGER like '%Kendalyn Stephens%' then 'Kendalyn Stephens'
-		 when NAME_OF_CASE_MANAGER like '%Lauren Pasutti%' then 'Lauren Pasutti'
-		 when NAME_OF_CASE_MANAGER like '%Catie Bryan%' then 'Catie Bryan'
-		 when NAME_OF_CASE_MANAGER like '%Emily Berns%' then 'Emily Berns'
-	else 'Non-DPH' end as assignment "Assigned to:",
-
+	NAME_OF_CASE_MANAGER as case_manag,
+	case when NAME_OF_CASE_MANAGER in ("&name1.", "&name2.", "&name3.", "&name4.", "&name5.") then 1 else 0 end as dhhs_tag,
+	case when NAME_OF_CASE_MANAGER in ("&name3.", "&name4.") then 'Yes' else 'No' end as ELC "ELC Core Program H",
+	case when NAME_OF_CASE_MANAGER in ("&name1.", "&name2.", "&name5.") then 'Yes' else 'No' end as SHARP_I_II	"SHARP I or SHARP II",
 	CODE
 
 from denorm.admin_trail
 	
 	where ASSIGNED_TO_DT GE ("01jan2025"d) /*Pulling a smaller subset from denorm tables for time*/
 		and CODE in ("CPO" , "CRE") /*Keep only CPO/CRE (should only be CPO but just in case)*/
-	having assignment not in ('Non-DPH')/*drop if not NC DPH employee*/ 
+	having dhhs_tag in (1)/*drop if not NC DPH employee*/ 
 	order by case_ID desc 
 		;
 quit;
@@ -106,7 +118,9 @@ create table case_manager_merge as
 select 
 
 	a.*,
-	b.assignment
+	b.case_manag,
+	b.ELC,
+	b.SHARP_I_II
 
 
 from CPO_mechext a left join case_manager_CPO b 
@@ -128,16 +142,11 @@ select * from CPO_RedCap_raw
 	order by spec_date asc;
 quit;
 
-
-proc print data=final_CRE_upload;run;
-
-
-
 /*Output so team can review in a nice clean excel sheet*/
 title; footnote;
 /*Set your output pathway here*/
 *ods excel file="T:\HAI\Code library\Epi curve example\analysis\CPO_ALL_&sysdate..xlsx"; /*<-- use this name if you include KPC*/
-ods excel file="T:\HAI\Code library\Epi curve example\analysis\CPO_CDCRedCap Upload_&sysdate..xlsx";
+ods excel file="T:\HAI\Code library\Epi curve example\analysis\CDC Reporting\CPO_CDCRedCap Upload_&sysdate..xlsx";
 ods excel options (sheet_interval = "now" sheet_name = "CPO: &start_dte" embedded_titles='Yes');
 
 	proc print data=final_CRE_upload noobs label;run;
@@ -145,3 +154,4 @@ ods excel options (sheet_interval = "now" sheet_name = "CPO: &start_dte" embedde
 ods excel close;
 
 
+proc print data=final_CRE_upload; where case_manag in ('');run;
