@@ -27,11 +27,13 @@ libname denorm 'Z:\20251001'; /*Select the file name you want from the Z drive. 
 
 /*Now we'll set our case manager names: update as needed to the number/names of those responding to NCEDSS entries AS THEIR NAMES APPEAR IN NCEDSS.*/
 /*Misspelled names or different capitalizations my throw off numbers by 1 or 2. Make sure names are correct in NCEDSS*/
-%let name1 = Damion Brown;
-%let name2 = Kendalyn Stephens;	
-%let name3 = Lauren Pasutti;
-%let name4 = Catie Bryan;
-%let name5 = Emily Berns;
+
+		/*Removed names in Git so it's not immedietly obvious*/
+%let name1 =
+%let name2 =
+%let name3 =
+%let name4 =
+%let name5 =
 
 /*Worth checking the log to make sure they're displaying properly*/
 	%put &name1;
@@ -155,3 +157,4 @@ ods excel close;
 
 
 proc print data=final_CRE_upload; where case_manag in ('');run;
+
